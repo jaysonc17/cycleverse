@@ -1,3 +1,4 @@
+import StreetViewIntegration from './components/StreetViewIntegration';
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Users, Trophy, Settings, Map, Zap, Heart, Activity, Timer, Award, Target, Bluetooth } from 'lucide-react';
 import { useBluetoothDevices } from './hooks/useBluetoothDevices';
@@ -61,7 +62,8 @@ const CycleVerse = () => {
     volcano: { name: 'Volcano World', color: '#ff6b35', terrain: 'volcanic' },
     forest: { name: 'Forest Trails', color: '#2d5016', terrain: 'forest' },
     city: { name: 'City Streets', color: '#4a90e2', terrain: 'urban' },
-    desert: { name: 'Desert Oasis', color: '#f4a261', terrain: 'desert' }
+    desert: { name: 'Desert Oasis', color: '#f4a261', terrain: 'desert' },
+    streetview: { name: 'Street View', color: '#4285f4', terrain: 'real-world' }
   };
 
   // Simulate cycling data when not connected to real devices
@@ -260,7 +262,15 @@ const CycleVerse = () => {
         <div className="flex-1">
           {/* 3D World View */}
           <div className="relative h-96 bg-black overflow-hidden">
-            <canvas ref={canvasRef} className="w-full h-full" />
+            {currentWorld === 'streetview' ? (
+              <StreetViewIntegration
+                speed={currentData.speed}
+                isRiding={isRiding}
+                currentData={currentData}
+              />
+            ) : (
+              <>
+                <canvas ref={canvasRef} className="w-full h-full" />            <canvas ref={canvasRef} className="w-full h-full" />
             
             {/* HUD Overlay */}
             <div className="absolute top-4 left-4 space-y-2">
@@ -285,7 +295,8 @@ const CycleVerse = () => {
             </div>
 
             {/* Control Buttons */}
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+              </>
+            )}            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
               <button
                 onClick={isRiding ? stopRide : startRide}
                 className={`flex items-center space-x-2 px-6 py-3 rounded-full font-semibold transition-colors ${
