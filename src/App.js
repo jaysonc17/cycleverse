@@ -1,27 +1,60 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Users, Trophy, Settings, Map, Zap, Heart, Activity, Timer, Award, Target } from 'lucide-react';
+import { Play, Pause, Users, Trophy, Settings, Map, Zap, Heart, Activity, Timer, Award, Target, Bluetooth } from 'lucide-react';
+import { useBluetoothDevices } from './hooks/useBluetoothDevices';
+import BluetoothPanel from './components/BluetoothPanel';
 
 const CycleVerse = () => {
   const [isRiding, setIsRiding] = useState(false);
   const [currentWorld, setCurrentWorld] = useState('volcano');
-  const [speed, setSpeed] = useState(0);
-  const [power, setPower] = useState(0);
-  const [heartRate, setHeartRate] = useState(0);
-  const [distance, setDistance] = useState(0);
-  const [time, setTime] = useState(0);
-  const [elevation, setElevation] = useState(150);
+  const [showBluetoothPanel, setShowBluetoothPanel] = useState(false);
+  const [achievements, setAchievements] = useState([]);
+  const [currentRoute, setCurrentRoute] = useState('Volcano Circuit');
   const [riders, setRiders] = useState([
     { id: 1, name: 'Alex_Rider', distance: 15.2, power: 285, avatar: '🚴‍♂️' },
     { id: 2, name: 'CycleQueen', distance: 14.8, power: 260, avatar: '🚴‍♀️' },
     { id: 3, name: 'SpeedDemon', distance: 16.1, power: 310, avatar: '🚴‍♂️' },
     { id: 4, name: 'You', distance: 0, power: 0, avatar: '🚴‍♂️' }
   ]);
-  const [achievements, setAchievements] = useState([]);
-  const [currentRoute, setCurrentRoute] = useState('Volcano Circuit');
   
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const terrainOffset = useRef(0);
+
+  // Bluetooth integration
+  const {
+    devices,
+    connectionStatus,
+    sensorData,
+    isBluetoothSupported,
+    connectToTrainer,
+    connectToPowerMeter,
+    connectToHeartRate,
+    disconnectDevice,
+    setResistance,
+    setTargetPower,
+    error: bluetoothError
+  } = useBluetoothDevices();
+
+  // Use real sensor data when available, otherwise simulate
+  const [simulatedData, setSimulatedData] = useState({
+    speed: 0,
+    power: 0,
+    heartRate: 0,
+    distance: 0,
+    time: 0,
+    elevation: 150
+  });
+
+  // Determine if we should use real or simulated data
+  const hasRealData = connectionStatus.trainer === 'connected' || connectionStatus.powerMeter === 'connected';
+  const currentData = hasRealData ? {
+    speed: sensorData.speed || 0,
+    power: sensorData.power || 0,
+    heartRate: sensorData.heartRate || simulatedData.heartRate,
+    distance: simulatedData.distance, // Keep tracking distance locally
+    time: simulatedData.time,
+    elevation: simulatedData.elevation
+  } : simulatedData;
 
   const worlds = {
     volcano: { name: 'Volcano World', color: '#ff6b35', terrain: 'volcanic' },
@@ -30,31 +63,43 @@ const CycleVerse = () => {
     desert: { name: 'Desert Oasis', color: '#f4a261', terrain: 'desert' }
   };
 
-  // Simulate cycling data
+  // Simulate cycling data when not connected to real devices
   useEffect(() => {
     let interval;
     if (isRiding) {
       interval = setInterval(() => {
-        const newSpeed = 25 + Math.random() * 10 - 5;
-        const newPower = 200 + Math.random() * 100;
-        const newHR = 140 + Math.random() * 40;
+        // Always update time and distance
+        setSimulatedData(prev => ({
+          ...prev,
+          time: prev.time + 1,
+          distance: prev.distance + (currentData.speed || 0) / 3600,
+          elevation: prev.elevation + (Math.random() - 0.5) * 2
+        }));
+
+        if (!hasRealData) {
+          // Only simulate if no real data available
+          const newSpeed = 25 + Math.random() * 10 - 5;
+          const newPower = 200 + Math.random() * 100;
+          const newHR = 140 + Math.random() * 40;
+          
+          setSimulatedData(prev => ({
+            ...prev,
+            speed: Math.max(0, newSpeed),
+            power: Math.max(0, newPower),
+            heartRate: Math.max(120, newHR)
+          }));
+        }
         
-        setSpeed(Math.max(0, newSpeed));
-        setPower(Math.max(0, newPower));
-        setHeartRate(Math.max(120, newHR));
-        setDistance(prev => prev + newSpeed / 3600);
-        setTime(prev => prev + 1);
-        setElevation(prev => prev + (Math.random() - 0.5) * 2);
-        
+        // Update rider position
         setRiders(prev => prev.map(rider => 
           rider.name === 'You' 
-            ? { ...rider, distance: distance, power: newPower }
+            ? { ...rider, distance: currentData.distance, power: currentData.power }
             : rider
         ));
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isRiding, distance]);
+  }, [isRiding, hasRealData, currentData.speed, currentData.distance, currentData.power]);
 
   // 3D terrain rendering
   useEffect(() => {
@@ -131,7 +176,7 @@ const CycleVerse = () => {
       }
       
       if (isRiding) {
-        terrainOffset.current += speed * 0.1;
+        terrainOffset.current += currentData.speed * 0.1;
       }
       
       animationRef.current = requestAnimationFrame(animate);
@@ -145,7 +190,7 @@ const CycleVerse = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [currentWorld, speed, isRiding]);
+  }, [currentWorld, currentData.speed, isRiding]);
 
   const formatTime = (seconds) => {
     const hrs = Math.floor(seconds / 3600);
@@ -156,17 +201,16 @@ const CycleVerse = () => {
 
   const startRide = () => {
     setIsRiding(true);
-    setDistance(0);
-    setTime(0);
+    setSimulatedData(prev => ({ ...prev, distance: 0, time: 0 }));
   };
 
   const stopRide = () => {
     setIsRiding(false);
-    if (distance > 5) {
+    if (currentData.distance > 5) {
       setAchievements(prev => [...prev, {
         id: Date.now(),
         title: 'Ride Complete',
-        description: `Completed ${distance.toFixed(1)}km ride`,
+        description: `Completed ${currentData.distance.toFixed(1)}km ride`,
         icon: '🏆'
       }]);
     }
@@ -174,6 +218,7 @@ const CycleVerse = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
       <div className="bg-gray-800 p-4 flex justify-between items-center">
         <div className="flex items-center space-x-4">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
@@ -191,33 +236,54 @@ const CycleVerse = () => {
             <Users className="w-4 h-4" />
             <span>{riders.length} riders</span>
           </div>
+          <button
+            onClick={() => setShowBluetoothPanel(!showBluetoothPanel)}
+            className={`flex items-center space-x-2 px-3 py-1 rounded ${
+              showBluetoothPanel ? 'bg-blue-600' : 'hover:bg-gray-700'
+            }`}
+          >
+            <Bluetooth className="w-4 h-4" />
+            <span className="hidden sm:inline">Devices</span>
+            {(connectionStatus.trainer === 'connected' || 
+              connectionStatus.powerMeter === 'connected' || 
+              connectionStatus.heartRate === 'connected') && (
+              <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+            )}
+          </button>
           <Settings className="w-5 h-5 cursor-pointer hover:text-blue-400" />
         </div>
       </div>
 
       <div className="flex flex-col lg:flex-row">
+        {/* Main View */}
         <div className="flex-1">
+          {/* 3D World View */}
           <div className="relative h-96 bg-black overflow-hidden">
             <canvas ref={canvasRef} className="w-full h-full" />
             
+            {/* HUD Overlay */}
             <div className="absolute top-4 left-4 space-y-2">
-              <div className="bg-black bg-opacity-50 rounded px-3 py-1 text-sm">
-                <span className="text-blue-400">Speed:</span> {speed.toFixed(1)} km/h
+              <div className={`bg-black bg-opacity-50 rounded px-3 py-1 text-sm ${hasRealData ? 'border-l-4 border-green-400' : ''}`}>
+                <span className="text-blue-400">Speed:</span> {currentData.speed.toFixed(1)} km/h
+                {hasRealData && <span className="text-green-400 text-xs ml-2">LIVE</span>}
+              </div>
+              <div className={`bg-black bg-opacity-50 rounded px-3 py-1 text-sm ${hasRealData ? 'border-l-4 border-green-400' : ''}`}>
+                <span className="text-yellow-400">Power:</span> {currentData.power.toFixed(0)}W
+                {hasRealData && <span className="text-green-400 text-xs ml-2">LIVE</span>}
               </div>
               <div className="bg-black bg-opacity-50 rounded px-3 py-1 text-sm">
-                <span className="text-yellow-400">Power:</span> {power.toFixed(0)}W
-              </div>
-              <div className="bg-black bg-opacity-50 rounded px-3 py-1 text-sm">
-                <span className="text-red-400">HR:</span> {heartRate.toFixed(0)} bpm
+                <span className="text-red-400">HR:</span> {currentData.heartRate.toFixed(0)} bpm
+                {connectionStatus.heartRate === 'connected' && <span className="text-green-400 text-xs ml-2">LIVE</span>}
               </div>
             </div>
 
             <div className="absolute top-4 right-4">
               <div className="bg-black bg-opacity-50 rounded px-3 py-1 text-sm">
-                Elevation: {elevation.toFixed(0)}m
+                Elevation: {currentData.elevation.toFixed(0)}m
               </div>
             </div>
 
+            {/* Control Buttons */}
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
               <button
                 onClick={isRiding ? stopRide : startRide}
@@ -233,6 +299,7 @@ const CycleVerse = () => {
             </div>
           </div>
 
+          {/* World Selection */}
           <div className="p-4 bg-gray-800">
             <h3 className="text-lg font-semibold mb-3">Select World:</h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -257,93 +324,140 @@ const CycleVerse = () => {
           </div>
         </div>
 
-        <div className="w-full lg:w-80 bg-gray-800 p-4 space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Session Stats</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Timer className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm text-gray-300">Time</span>
+        {/* Right Sidebar */}
+        <div className="w-full lg:w-80 bg-gray-800 space-y-6">
+          {/* Bluetooth Panel */}
+          {showBluetoothPanel && (
+            <div className="p-4">
+              <BluetoothPanel
+                connectionStatus={connectionStatus}
+                sensorData={sensorData}
+                isBluetoothSupported={isBluetoothSupported}
+                connectToTrainer={connectToTrainer}
+                connectToPowerMeter={connectToPowerMeter}
+                connectToHeartRate={connectToHeartRate}
+                disconnectDevice={disconnectDevice}
+                error={bluetoothError}
+                setResistance={setResistance}
+                setTargetPower={setTargetPower}
+              />
+            </div>
+          )}
+
+          <div className="p-4 space-y-6">
+            {/* Stats */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Session Stats</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-700 p-3 rounded">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Timer className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm text-gray-300">Time</span>
+                  </div>
+                  <div className="text-xl font-mono">{formatTime(currentData.time)}</div>
                 </div>
-                <div className="text-xl font-mono">{formatTime(time)}</div>
-              </div>
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Target className="w-4 h-4 text-green-400" />
-                  <span className="text-sm text-gray-300">Distance</span>
+                <div className="bg-gray-700 p-3 rounded">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Target className="w-4 h-4 text-green-400" />
+                    <span className="text-sm text-gray-300">Distance</span>
+                  </div>
+                  <div className="text-xl">{currentData.distance.toFixed(1)} km</div>
                 </div>
-                <div className="text-xl">{distance.toFixed(1)} km</div>
-              </div>
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Zap className="w-4 h-4 text-yellow-400" />
-                  <span className="text-sm text-gray-300">Avg Power</span>
+                <div className="bg-gray-700 p-3 rounded">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Zap className="w-4 h-4 text-yellow-400" />
+                    <span className="text-sm text-gray-300">Avg Power</span>
+                  </div>
+                  <div className="text-xl">{currentData.power.toFixed(0)}W</div>
                 </div>
-                <div className="text-xl">{power.toFixed(0)}W</div>
-              </div>
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Heart className="w-4 h-4 text-red-400" />
-                  <span className="text-sm text-gray-300">Avg HR</span>
+                <div className="bg-gray-700 p-3 rounded">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Heart className="w-4 h-4 text-red-400" />
+                    <span className="text-sm text-gray-300">Avg HR</span>
+                  </div>
+                  <div className="text-xl">{currentData.heartRate.toFixed(0)}</div>
                 </div>
-                <div className="text-xl">{heartRate.toFixed(0)}</div>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold flex items-center space-x-2">
-              <Trophy className="w-5 h-5 text-yellow-400" />
-              <span>Live Riders</span>
-            </h3>
-            <div className="space-y-2">
-              {riders
-                .sort((a, b) => b.distance - a.distance)
-                .map((rider, index) => (
-                <div
-                  key={rider.id}
-                  className={`flex items-center justify-between p-2 rounded ${
-                    rider.name === 'You' ? 'bg-blue-600 bg-opacity-30' : 'bg-gray-700'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">{index + 1}</span>
-                    <span className="text-2xl">{rider.avatar}</span>
-                    <div>
-                      <div className="font-medium">{rider.name}</div>
-                      <div className="text-sm text-gray-400">{rider.power}W</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono">{rider.distance.toFixed(1)}km</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {achievements.length > 0 && (
+            {/* Leaderboard */}
             <div className="space-y-3">
               <h3 className="text-lg font-semibold flex items-center space-x-2">
-                <Award className="w-5 h-5 text-purple-400" />
-                <span>Recent Achievements</span>
+                <Trophy className="w-5 h-5 text-yellow-400" />
+                <span>Live Riders</span>
               </h3>
               <div className="space-y-2">
-                {achievements.slice(-3).map((achievement) => (
-                  <div key={achievement.id} className="bg-gray-700 p-3 rounded">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-2xl">{achievement.icon}</span>
+                {riders
+                  .sort((a, b) => b.distance - a.distance)
+                  .map((rider, index) => (
+                  <div
+                    key={rider.id}
+                    className={`flex items-center justify-between p-2 rounded ${
+                      rider.name === 'You' ? 'bg-blue-600 bg-opacity-30' : 'bg-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <span className="text-lg">{index + 1}</span>
+                      <span className="text-2xl">{rider.avatar}</span>
                       <div>
-                        <div className="font-medium">{achievement.title}</div>
-                        <div className="text-sm text-gray-400">{achievement.description}</div>
+                        <div className="font-medium">{rider.name}</div>
+                        <div className="text-sm text-gray-400">{rider.power}W</div>
                       </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono">{rider.distance.toFixed(1)}km</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+
+            {/* Achievements */}
+            {achievements.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-lg font-semibold flex items-center space-x-2">
+                  <Award className="w-5 h-5 text-purple-400" />
+                  <span>Recent Achievements</span>
+                </h3>
+                <div className="space-y-2">
+                  {achievements.slice(-3).map((achievement) => (
+                    <div key={achievement.id} className="bg-gray-700 p-3 rounded">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-2xl">{achievement.icon}</span>
+                        <div>
+                          <div className="font-medium">{achievement.title}</div>
+                          <div className="text-sm text-gray-400">{achievement.description}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Power Zones */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Power Zones</h3>
+              <div className="space-y-2">
+                {[
+                  { zone: 'Recovery', min: 0, max: 150, color: 'bg-gray-500' },
+                  { zone: 'Endurance', min: 150, max: 200, color: 'bg-blue-500' },
+                  { zone: 'Tempo', min: 200, max: 250, color: 'bg-green-500' },
+                  { zone: 'Threshold', min: 250, max: 300, color: 'bg-yellow-500' },
+                  { zone: 'VO2 Max', min: 300, max: 400, color: 'bg-red-500' }
+                ].map((zone) => (
+                  <div key={zone.zone} className="flex items-center space-x-3">
+                    <div className={`w-3 h-3 rounded-full ${zone.color}`} />
+                    <span className="text-sm flex-1">{zone.zone}</span>
+                    <span className="text-xs text-gray-400">{zone.min}-{zone.max}W</span>
+                    {currentData.power >= zone.min && currentData.power <= zone.max && (
+                      <Activity className="w-4 h-4 text-green-400" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
