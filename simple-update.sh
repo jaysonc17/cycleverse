@@ -497,7 +497,7 @@ git commit -m "Add universal smart trainer support
 - Improved error messages with actionable advice
 - Real-time device information display"
 
-git push origin main
+git push origin master
 
 echo ""
 echo "✅ Update complete!"
